@@ -1,0 +1,13 @@
+<resources>
+    <style name="Theme.MysticTarot" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#050814</item>
+        <item name="android:statusBarColor">#090B1F</item>
+        <item name="android:windowBackground">#D8CFF0</item>
+        <item name="android:windowSplashScreenBackground">#D8CFF0</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#00000000</item>
+    </style>
+</resources>
