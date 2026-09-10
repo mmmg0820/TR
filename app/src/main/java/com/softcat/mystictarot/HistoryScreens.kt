@@ -7,8 +7,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,14 +45,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -76,6 +86,7 @@ fun HistoryScreenV2(
     onSaveSpreadPreset: (SavedSpreadPreset) -> Unit,
     onDeleteSavedSpread: (String) -> Unit,
     onDeleteReadings: (Set<Long>) -> Unit,
+    onToggleReadingPinned: (Long) -> Unit,
     listState: LazyListState,
     bottomPadding: Dp
 ) {
@@ -85,6 +96,8 @@ fun HistoryScreenV2(
     val selectedIds = remember { mutableStateListOf<Long>() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var spreadToDelete by remember { mutableStateOf<SavedSpreadPreset?>(null) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var pinnedOnly by rememberSaveable { mutableStateOf(false) }
     fun toggleReading(reading: SavedReading) {
         if (selectedIds.contains(reading.id)) selectedIds.remove(reading.id) else selectedIds.add(reading.id)
         if (selectedIds.isEmpty()) selectionMode = false
@@ -171,6 +184,17 @@ fun HistoryScreenV2(
         }
 
         if (section == HistorySection.SavedTarot) {
+            if (savedReadings.isNotEmpty()) {
+                item {
+                    HistorySearchControls(
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it.take(80) },
+                        pinnedOnly = pinnedOnly,
+                        onTogglePinnedOnly = { pinnedOnly = !pinnedOnly }
+                    )
+                }
+            }
+            val readingsForDisplay = savedReadingsForDisplay(savedReadings, searchQuery, pinnedOnly)
             if (savedReadings.isEmpty()) {
                 item {
                     HarmonyCard {
@@ -179,8 +203,15 @@ fun HistoryScreenV2(
                         Text("마음에 남는 리딩을 저장하면 이곳에서 다시 볼 수 있어요.", color = harmonySub, fontSize = 13.sp, lineHeight = 18.sp)
                     }
                 }
+            } else if (readingsForDisplay.isEmpty()) {
+                item {
+                    HarmonyCard {
+                        Text("조건에 맞는 기록이 없어요", color = harmonyInk, fontSize = 17.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(6.dp))
+                        Text("검색어를 바꾸거나 고정만 필터를 꺼보세요.", color = harmonySub, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                }
             } else {
-                val readingsForDisplay = savedReadings.asReversed()
                 items(
                     items = readingsForDisplay,
                     key = { it.id }
@@ -188,15 +219,17 @@ fun HistoryScreenV2(
                     HarmonyCard(padding = PaddingValues(0.dp)) {
                         HistoryReadingRowV2(
                             reading = reading,
+                            pinned = reading.isPinned,
                             selected = selectedIds.contains(reading.id),
                             selectionMode = selectionMode,
-                            onClick = {
+                            onRowClick = {
                                 if (selectionMode) toggleReading(reading) else onOpenReading(reading)
                             },
-                            onLongPress = {
+                            onRowLongPress = {
                                 selectionMode = true
                                 if (!selectedIds.contains(reading.id)) selectedIds.add(reading.id)
-                            }
+                            },
+                            onTogglePinned = { onToggleReadingPinned(reading.id) }
                         )
                     }
                 }
@@ -257,6 +290,55 @@ fun HistoryScreenV2(
     }
 }
 
+@Composable
+private fun HistorySearchControls(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    pinnedOnly: Boolean,
+    onTogglePinnedOnly: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.weight(1f),
+            label = { Text("기록 검색") },
+            singleLine = true,
+            shape = RoundedCornerShape(8.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = harmonyBlue,
+                unfocusedBorderColor = harmonyDivider,
+                focusedContainerColor = harmonyPanel,
+                unfocusedContainerColor = harmonyPanel,
+                cursorColor = harmonyBlue
+            )
+        )
+        Box(
+            modifier = Modifier
+                .sizeIn(minWidth = 64.dp, minHeight = 48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (pinnedOnly) harmonyBlue else harmonySecondaryPanel)
+                .border(1.dp, if (pinnedOnly) harmonyBlue else harmonyDivider, RoundedCornerShape(8.dp))
+                .clickable(role = Role.Button, onClick = onTogglePinnedOnly)
+                .semantics { stateDescription = if (pinnedOnly) "켜짐" else "꺼짐" }
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "고정만",
+                color = if (pinnedOnly) Color.White else harmonyInk,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
 private enum class HistorySection(val label: String) {
     SavedTarot("저장된 타로"),
     SavedSpread("저장된 스프레드")
@@ -277,7 +359,14 @@ private fun HistorySectionTabs(selected: HistorySection, onSelect: (HistorySecti
                     .weight(1f)
                     .fillMaxHeight()
                     .sizeIn(minHeight = HoscatBottomCtaMinTouchHeight)
-                    .clickable { onSelect(section) },
+                    .clickable(
+                        role = Role.Tab,
+                        onClick = { onSelect(section) }
+                    )
+                    .semantics {
+                        this.selected = isSelected
+                        stateDescription = if (isSelected) "선택됨" else "선택 안 됨"
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -603,12 +692,15 @@ private fun DeleteSavedSpreadDialog(presetName: String, onCancel: () -> Unit, on
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun HistoryReadingRowV2(
     reading: SavedReading,
+    pinned: Boolean,
     selected: Boolean,
     selectionMode: Boolean,
-    onClick: () -> Unit,
-    onLongPress: () -> Unit
+    onRowClick: () -> Unit,
+    onRowLongPress: () -> Unit,
+    onTogglePinned: () -> Unit
 ) {
     val question = reading.question.trim()
     val hasQuestion = question.isNotBlank()
@@ -623,9 +715,29 @@ private fun HistoryReadingRowV2(
             .sizeIn(minHeight = 72.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(bg)
-            .pointerInput(reading.id, selectionMode) {
-                detectTapGestures(onTap = { onClick() }, onLongPress = { onLongPress() })
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                this.selected = selected
+                stateDescription = when {
+                    selected -> "선택됨"
+                    selectionMode -> "선택 안 됨"
+                    pinned -> "고정됨, 기록 열기"
+                    else -> "기록 열기"
+                }
+                onClick(label = if (selectionMode) "기록 선택" else "기록 열기") {
+                    onRowClick()
+                    true
+                }
+                onLongClick(label = "기록 선택 모드") {
+                    onRowLongPress()
+                    true
+                }
             }
+            .combinedClickable(
+                role = Role.Button,
+                onClick = onRowClick,
+                onLongClick = onRowLongPress
+            )
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -673,7 +785,22 @@ private fun HistoryReadingRowV2(
             )
         }
         Spacer(Modifier.width(8.dp))
-        HarmonyIconGlyph(if (selectionMode) HarmonyIcon.Check else HarmonyIcon.Chevron, if (selected) harmonyBlue else harmonyTertiary, Modifier.size(20.dp))
+        if (selectionMode) {
+            HarmonyIconGlyph(HarmonyIcon.Check, if (selected) harmonyBlue else harmonyTertiary, Modifier.size(20.dp))
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(if (pinned) harmonyBlue.copy(alpha = 0.12f) else Color.Transparent)
+                    .clickable(role = Role.Button, onClick = onTogglePinned)
+                    .semantics { stateDescription = if (pinned) "고정됨" else "고정 안 됨" },
+                contentAlignment = Alignment.Center
+            ) {
+                HarmonyIconGlyph(HarmonyIcon.Pin, if (pinned) harmonyBlue else harmonyTertiary, Modifier.size(20.dp))
+            }
+            HarmonyIconGlyph(HarmonyIcon.Chevron, harmonyTertiary, Modifier.size(20.dp))
+        }
     }
 }
 
@@ -891,7 +1018,12 @@ private fun SavedSpreadReplayCard(
     onSelectCard: (SavedReadingCard) -> Unit
 ) {
     val spread = remember(reading.id, reading.cards.size) { resolveSavedSpreadOption(reading) }
-    val slots = remember(spread.key, reading.cards.size) { spreadSlots(spread, reading.cards.size) }
+    val slots = remember(spread.key, reading.cards.size, reading.spreadSlotsSnapshot) {
+        reading.spreadSlotsSnapshot
+            .takeIf { it.size == reading.cards.size }
+            ?.map { snapshot -> SpreadSlot(snapshot.x, snapshot.y, snapshot.rotation) }
+            ?: spreadSlots(spread, reading.cards.size)
+    }
     HarmonyCard(modifier = modifier, padding = PaddingValues(12.dp)) {
         Text("스프레드", color = harmonyInk, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
@@ -927,6 +1059,7 @@ private fun SavedSpreadReplayCard(
                                 .width(cardW)
                                 .height(cardH)
                                 .offset(x = cardW * slot.x, y = cardH * slot.y)
+                                .graphicsLayer { rotationZ = slot.rotation }
                                 .clip(RoundedCornerShape(10.dp))
                                 .border(
                                     if (selected) 2.dp else 1.dp,
@@ -1020,6 +1153,13 @@ private fun SavedCardDetailPanel(
 
 private fun resolveSavedSpreadOption(reading: SavedReading): SpreadOption {
     return spreadOptions.firstOrNull {
+        reading.spreadKeySnapshot.isNotBlank() && it.key == reading.spreadKeySnapshot
+    } ?: spreadOptions.firstOrNull {
+        reading.layoutIdSnapshot.isNotBlank() &&
+            it.layoutId == reading.layoutIdSnapshot &&
+            it.cardCount == reading.cards.size &&
+            it.positionPresetTitle == reading.positionPresetTitle
+    } ?: spreadOptions.firstOrNull {
         it.cardCount == reading.cards.size &&
             it.layoutTitle == reading.layoutTitle &&
             it.positionPresetTitle == reading.positionPresetTitle

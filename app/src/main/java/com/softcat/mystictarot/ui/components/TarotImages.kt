@@ -51,6 +51,15 @@ private object TarotBitmapCache {
     }
 }
 
+private object TarotBitmapDecodeLocks {
+    private val locks = Array(16) { Any() }
+
+    fun lockFor(key: String): Any {
+        val index = (key.hashCode() and Int.MAX_VALUE) % locks.size
+        return locks[index]
+    }
+}
+
 fun clearTarotBitmapCache() = TarotBitmapCache.clear()
 
 @Composable
@@ -137,30 +146,33 @@ private fun sampledImageBitmapFromResource(
 ): ImageBitmap? {
     val cacheKey = "res:$resId#$maxTextureSize"
     TarotBitmapCache.get(cacheKey)?.let { return it.asImageBitmap() }
-    return runCatching {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeResource(context.resources, resId, bounds)
+    return synchronized(TarotBitmapDecodeLocks.lockFor(cacheKey)) {
+        TarotBitmapCache.get(cacheKey)?.let { return@synchronized it.asImageBitmap() }
+        runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeResource(context.resources, resId, bounds)
 
-        val largestSide = max(bounds.outWidth, bounds.outHeight)
-        val sampleSize = if (largestSide <= 0) {
-            1
-        } else {
-            var sample = 1
-            while (largestSide / sample > maxTextureSize) {
-                sample *= 2
+            val largestSide = max(bounds.outWidth, bounds.outHeight)
+            val sampleSize = if (largestSide <= 0) {
+                1
+            } else {
+                var sample = 1
+                while (largestSide / sample > maxTextureSize) {
+                    sample *= 2
+                }
+                sample
             }
-            sample
-        }
 
-        val decodeOptions = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-            inScaled = false
-        }
-        BitmapFactory.decodeResource(context.resources, resId, decodeOptions)?.also { bitmap ->
-            TarotBitmapCache.put(cacheKey, bitmap)
-        }?.asImageBitmap()
-    }.getOrNull()
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                inScaled = false
+            }
+            BitmapFactory.decodeResource(context.resources, resId, decodeOptions)?.also { bitmap ->
+                TarotBitmapCache.put(cacheKey, bitmap)
+            }?.asImageBitmap()
+        }.getOrNull()
+    }
 }
 
 fun sampledImageBitmapFromUri(
@@ -170,33 +182,36 @@ fun sampledImageBitmapFromUri(
 ): ImageBitmap? {
     val cacheKey = "$uriString#$maxTextureSize"
     TarotBitmapCache.get(cacheKey)?.let { return it.asImageBitmap() }
-    return runCatching {
-        val uri = Uri.parse(uriString)
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            BitmapFactory.decodeStream(input, null, bounds)
-        }
-
-        val largestSide = max(bounds.outWidth, bounds.outHeight)
-        val sampleSize = if (largestSide <= 0) {
-            1
-        } else {
-            var sample = 1
-            while (largestSide / sample > maxTextureSize) {
-                sample *= 2
+    return synchronized(TarotBitmapDecodeLocks.lockFor(cacheKey)) {
+        TarotBitmapCache.get(cacheKey)?.let { return@synchronized it.asImageBitmap() }
+        runCatching {
+            val uri = Uri.parse(uriString)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, bounds)
             }
-            sample
-        }
 
-        val decodeOptions = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-            inScaled = false
-        }
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            BitmapFactory.decodeStream(input, null, decodeOptions)?.also { bitmap ->
-                TarotBitmapCache.put(cacheKey, bitmap)
-            }?.asImageBitmap()
-        }
-    }.getOrNull()
+            val largestSide = max(bounds.outWidth, bounds.outHeight)
+            val sampleSize = if (largestSide <= 0) {
+                1
+            } else {
+                var sample = 1
+                while (largestSide / sample > maxTextureSize) {
+                    sample *= 2
+                }
+                sample
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                inScaled = false
+            }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, decodeOptions)?.also { bitmap ->
+                    TarotBitmapCache.put(cacheKey, bitmap)
+                }?.asImageBitmap()
+            }
+        }.getOrNull()
+    }
 }

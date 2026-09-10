@@ -10,7 +10,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 enum class ThemeChoice(val label: String, val subtitle: String, val isDark: Boolean = false) {
-    HoscatSignature("호스캣 시그니처", "아이보리 · 잉크 · 세이지"),
+    HoscatSignature("호스캣 시그니처", "화이트 · 잉크 · 버건디"),
     FamiliarOneUiLight("가장 익숙한 테마", "갤럭시 사용자는 다 아는 그 색감"),
     ClassicLight("클래식 라이트", "Android 기본 감각의 라이트"),
     CrimsonMirror("홍염의 거울", "정유 모티프 · 절제된 홍염"),
@@ -45,20 +45,20 @@ data class HarmonyColors(
 )
 
 val HoscatSignatureColors = HarmonyColors(
-    appBackground = Color(0xFFF7F2EA),
-    surfacePrimary = Color(0xFFFFFCF7),
-    surfaceSecondary = Color(0xFFE8EFE7),
-    textPrimary = Color(0xFF171A17),
-    textSecondary = Color(0xFF2F4739),
-    textTertiary = Color(0xFF746F68),
-    divider = Color(0x33CFC5BA),
-    primaryBlue = Color(0xFF2F5E48),
-    warningRed = Color(0xFFB85B53),
-    successGreen = Color(0xFF4F8065),
-    cardBackTop = Color(0xFF17201B),
-    cardBackBottom = Color(0xFF2F4739),
-    cardBackLine = Color(0xFFD7CBBE),
-    cardBackLogo = Color(0xFFF7F2EA)
+    appBackground = Color(0xFFFAFBFA),
+    surfacePrimary = Color(0xFFFFFFFF),
+    surfaceSecondary = Color(0xFFF0F3F1),
+    textPrimary = Color(0xFF151B18),
+    textSecondary = Color(0xFF536159),
+    textTertiary = Color(0xFF6E7872),
+    divider = Color(0xFFDCE2DE),
+    primaryBlue = Color(0xFF7B2345),
+    warningRed = Color(0xFFAE2638),
+    successGreen = Color(0xFF226349),
+    cardBackTop = Color(0xFF111615),
+    cardBackBottom = Color(0xFF2C493D),
+    cardBackLine = Color(0xFFD7E6DF),
+    cardBackLogo = Color(0xFFDFC6CD)
 )
 
 val ClassicLightColors = HarmonyColors(

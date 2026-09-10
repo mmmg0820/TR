@@ -19,6 +19,13 @@ class MyangTarotRepository(context: Context) {
             .apply()
     }
 
+    private fun persistJsonCommitted(prefName: String, key: String, value: String): Boolean {
+        return appContext.getSharedPreferences(prefName, Context.MODE_PRIVATE)
+            .edit()
+            .putString(key, value)
+            .commit()
+    }
+
     private fun migrateStoredDataIfNeeded() {
         migrateAppSettingsIfNeeded()
         migrateCustomDecksIfNeeded()
@@ -137,6 +144,98 @@ class MyangTarotRepository(context: Context) {
                 customPositionLabelsBySpreadKey = customPositionLabels
             )
         }.getOrDefault(AppSettings())
+    }
+
+    fun persistReadingDraft(draft: ReadingDraft): Boolean {
+        val spread = draft.spread
+        val json = JSONObject()
+            .put("schemaVersion", READING_DRAFT_SCHEMA_VERSION)
+            .put("updatedAt", draft.updatedAt)
+            .put("screen", draft.screen.name)
+            .put("deckId", draft.deckId)
+            .put("question", draft.question.take(240))
+            .put("finalOneSecondStep", draft.finalOneSecondStep)
+            .put("shuffledCardIds", JSONArray(draft.shuffledCardIds))
+            .put("selectedCardIds", JSONArray(draft.selectedCardIds))
+            .put("finalCandidateCardIds", JSONArray(draft.finalCandidateCardIds))
+            .put("spread", JSONObject()
+                .put("key", spread.key)
+                .put("title", spread.title)
+                .put("subtitle", spread.subtitle)
+                .put("cardCount", spread.cardCount)
+                .put("drawMode", spread.drawMode.name)
+                .put("layoutId", spread.layoutId)
+                .put("layoutTitle", spread.layoutTitle)
+                .put("layoutSubtitle", spread.layoutSubtitle)
+                .put("positionPresetTitle", spread.positionPresetTitle)
+                .put("positionLabels", JSONArray(spread.positionLabels)))
+            .put("drawnCards", JSONArray().apply {
+                draft.drawnCards.forEach { card ->
+                    put(JSONObject()
+                        .put("cardId", card.cardId)
+                        .put("direction", card.direction.name)
+                        .put("order", card.order))
+                }
+            })
+        return persistJsonCommitted(READING_DRAFT_PREF, READING_DRAFT_KEY, json.toString())
+    }
+
+    fun loadReadingDraft(): ReadingDraft? {
+        val raw = appContext.getSharedPreferences(READING_DRAFT_PREF, Context.MODE_PRIVATE)
+            .getString(READING_DRAFT_KEY, null)
+            ?: return null
+        return runCatching {
+            val json = JSONObject(raw)
+            val spreadJson = json.getJSONObject("spread")
+            val positionLabels = spreadJson.optJSONArray("positionLabels").joinList()
+            val spread = SpreadOption(
+                key = spreadJson.getString("key"),
+                title = spreadJson.getString("title"),
+                subtitle = spreadJson.optString("subtitle"),
+                cardCount = spreadJson.getInt("cardCount"),
+                drawMode = SpreadDrawMode.entries.firstOrNull {
+                    it.name == spreadJson.optString("drawMode")
+                } ?: SpreadDrawMode.Normal,
+                layoutId = spreadJson.getString("layoutId"),
+                layoutTitle = spreadJson.optString("layoutTitle"),
+                layoutSubtitle = spreadJson.optString("layoutSubtitle"),
+                positionPresetTitle = spreadJson.optString("positionPresetTitle"),
+                positionLabels = positionLabels
+            )
+            val drawnCardsJson = json.optJSONArray("drawnCards") ?: JSONArray()
+            val drawnCards = buildList {
+                for (index in 0 until drawnCardsJson.length()) {
+                    val card = drawnCardsJson.getJSONObject(index)
+                    add(ReadingDraftCard(
+                        cardId = card.getInt("cardId"),
+                        direction = CardDirection.entries.firstOrNull {
+                            it.name == card.optString("direction")
+                        } ?: CardDirection.Upright,
+                        order = card.getInt("order")
+                    ))
+                }
+            }
+            ReadingDraft(
+                schemaVersion = json.optInt("schemaVersion", 0),
+                updatedAt = json.getLong("updatedAt"),
+                screen = AppScreen.entries.first { it.name == json.getString("screen") },
+                deckId = json.getString("deckId"),
+                spread = spread,
+                question = json.optString("question").take(240),
+                shuffledCardIds = json.optJSONArray("shuffledCardIds").intList(),
+                selectedCardIds = json.optJSONArray("selectedCardIds").intList(),
+                finalCandidateCardIds = json.optJSONArray("finalCandidateCardIds").intList(),
+                finalOneSecondStep = json.optBoolean("finalOneSecondStep", false),
+                drawnCards = drawnCards
+            )
+        }.getOrNull()
+    }
+
+    fun clearReadingDraft(): Boolean {
+        return appContext.getSharedPreferences(READING_DRAFT_PREF, Context.MODE_PRIVATE)
+            .edit()
+            .remove(READING_DRAFT_KEY)
+            .commit()
     }
 
     fun persistAppSettings(
@@ -267,7 +366,7 @@ class MyangTarotRepository(context: Context) {
         }.getOrElse { emptyList() }
     }
 
-    fun persistSavedReadings(readings: List<SavedReading>) {
+    fun persistSavedReadings(readings: List<SavedReading>): Boolean {
         val array = JSONArray()
         readings.forEach { reading ->
             val cards = JSONArray()
@@ -284,6 +383,15 @@ class MyangTarotRepository(context: Context) {
                         .put("imageUri", card.imageUri ?: JSONObject.NULL)
                 )
             }
+            val spreadSlots = JSONArray()
+            reading.spreadSlotsSnapshot.forEach { slot ->
+                spreadSlots.put(
+                    JSONObject()
+                        .put("x", slot.x.toDouble())
+                        .put("y", slot.y.toDouble())
+                        .put("rotation", slot.rotation.toDouble())
+                )
+            }
             array.put(
                 JSONObject()
                     .put("schemaVersion", SAVED_READING_SCHEMA_VERSION)
@@ -293,15 +401,20 @@ class MyangTarotRepository(context: Context) {
                     .put("spreadTitle", reading.spreadTitle)
                     .put("layoutTitle", reading.layoutTitle)
                     .put("positionPresetTitle", reading.positionPresetTitle)
+                    .put("spreadKeySnapshot", reading.spreadKeySnapshot)
+                    .put("layoutIdSnapshot", reading.layoutIdSnapshot)
+                    .put("drawModeSnapshot", reading.drawModeSnapshot.name)
+                    .put("spreadSlotsSnapshot", spreadSlots)
                     .put("question", reading.question)
                     .put("interpretation", reading.interpretation)
                     .put("deckId", reading.deckId)
                     .put("deckName", reading.deckName)
                     .put("deckAiPromptSnapshot", reading.deckAiPromptSnapshot)
+                    .put("isPinned", reading.isPinned)
                     .put("cards", cards)
             )
         }
-        persistJson(SAVED_READINGS_PREF, SAVED_READINGS_KEY, array.toString())
+        return persistJsonCommitted(SAVED_READINGS_PREF, SAVED_READINGS_KEY, array.toString())
     }
 
     fun loadSavedReadings(): List<SavedReading> {
@@ -314,6 +427,24 @@ class MyangTarotRepository(context: Context) {
                 for (i in 0 until array.length()) {
                     val item = array.optJSONObject(i) ?: continue
                     val cardsArray = item.optJSONArray("cards") ?: JSONArray()
+                    val spreadSlotsArray = item.optJSONArray("spreadSlotsSnapshot") ?: JSONArray()
+                    val spreadSlots = buildList {
+                        for (slotIndex in 0 until spreadSlotsArray.length()) {
+                            val slot = spreadSlotsArray.optJSONObject(slotIndex) ?: continue
+                            val x = slot.optDouble("x", Double.NaN)
+                            val y = slot.optDouble("y", Double.NaN)
+                            val rotation = slot.optDouble("rotation", 0.0)
+                            if (x.isFinite() && y.isFinite() && rotation.isFinite()) {
+                                add(
+                                    SavedSpreadSlotSnapshot(
+                                        x = x.toFloat(),
+                                        y = y.toFloat(),
+                                        rotation = rotation.toFloat()
+                                    )
+                                )
+                            }
+                        }
+                    }
                     val cards = buildList {
                         for (j in 0 until cardsArray.length()) {
                             val card = cardsArray.optJSONObject(j) ?: continue
@@ -339,13 +470,22 @@ class MyangTarotRepository(context: Context) {
                             spreadTitle = item.optString("spreadTitle", "리딩"),
                             layoutTitle = item.optString("layoutTitle", item.optString("spreadTitle", "리딩")),
                             positionPresetTitle = item.optString("positionPresetTitle", item.optString("spreadTitle", "리딩")),
+                            spreadKeySnapshot = item.optString("spreadKeySnapshot", ""),
+                            layoutIdSnapshot = item.optString("layoutIdSnapshot", ""),
+                            drawModeSnapshot = runCatching {
+                                SpreadDrawMode.valueOf(
+                                    item.optString("drawModeSnapshot", SpreadDrawMode.Normal.name)
+                                )
+                            }.getOrDefault(SpreadDrawMode.Normal),
+                            spreadSlotsSnapshot = spreadSlots.takeIf { it.size == cards.size }.orEmpty(),
                             question = item.optString("question", ""),
                             interpretation = item.optString("interpretation", ""),
                             deckId = item.optString("deckId", "standard").ifBlank { "standard" },
                             deckName = item.optString("deckName", "유니버셜 타로").ifBlank { "유니버셜 타로" },
                             deckAiPromptSnapshot = item.optString("deckAiPromptSnapshot", ""),
+                            isPinned = item.optBoolean("isPinned", false),
                             cards = cards,
-                            schemaVersion = item.optInt("schemaVersion", 1)
+                            schemaVersion = SAVED_READING_SCHEMA_VERSION
                         )
                     )
                 }
@@ -499,6 +639,13 @@ class MyangTarotRepository(context: Context) {
         }
     }
 
+    private fun JSONArray?.intList(): List<Int> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (index in 0 until length()) add(getInt(index))
+        }
+    }
+
     private companion object {
         const val APP_SETTINGS_PREF = "myang_app_settings"
         const val APP_SETTINGS_KEY = "settings"
@@ -508,5 +655,7 @@ class MyangTarotRepository(context: Context) {
         const val SAVED_READINGS_KEY = "items"
         const val SAVED_SPREAD_PRESETS_PREF = "myang_saved_spread_presets"
         const val SAVED_SPREAD_PRESETS_KEY = "items"
+        const val READING_DRAFT_PREF = "myang_reading_draft"
+        const val READING_DRAFT_KEY = "draft"
     }
 }

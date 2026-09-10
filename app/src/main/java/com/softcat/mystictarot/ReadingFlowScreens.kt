@@ -1201,6 +1201,7 @@ fun SpreadResultScreen(
     showSpreadDetails: Boolean,
     showLlmPrompt: Boolean,
     readingSaved: Boolean,
+    readingSaveInProgress: Boolean,
     showLlmAction: Boolean,
     showCardDetailsAction: Boolean,
     deckAiPrompt: String,
@@ -1216,6 +1217,12 @@ fun SpreadResultScreen(
     onSaveReading: () -> Unit,
     onCloseExpanded: () -> Unit
 ) {
+    val saveLabel = when {
+        readingSaved -> "저장됨"
+        readingSaveInProgress -> "저장 중"
+        else -> "저장"
+    }
+    val saveContentColor = if (readingSaved || readingSaveInProgress) harmonyInk else Color.White
     val hasSecondaryResultActions = showLlmAction || showCardDetailsAction
     val resultActionRows = 1 + if (hasSecondaryResultActions) 1 else 0
     val fallbackResultActionHeight = hoscatInitialActionStackHeight(resultActionRows)
@@ -1290,20 +1297,21 @@ fun SpreadResultScreen(
                 )
             }
             HoscatBottomCta(
-                label = if (readingSaved) "저장됨" else "저장",
+                label = saveLabel,
                 onClick = onSaveReading,
+                enabled = !readingSaveInProgress,
                 modifier = Modifier
                     .fillMaxWidth(),
                 containerColor = if (readingSaved) harmonySecondaryPanel else harmonyBlue,
-                contentColor = if (readingSaved) harmonyInk else Color.White
+                contentColor = saveContentColor
             ) {
                 if (readingSaved) {
                     HarmonyIconGlyph(HarmonyIcon.Check, harmonyBlue, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(
-                    if (readingSaved) "저장됨" else "저장",
-                    color = if (readingSaved) harmonyInk else Color.White,
+                    saveLabel,
+                    color = saveContentColor,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold
                 )

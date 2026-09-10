@@ -101,7 +101,7 @@ fun HomeWorkbenchScreen(
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .size(42.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(8.dp))
                         )
                         Spacer(Modifier.width(12.dp))
                         Column {

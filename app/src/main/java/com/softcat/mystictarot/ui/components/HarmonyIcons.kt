@@ -34,6 +34,7 @@ enum class HarmonyIcon {
     Theme,
     Add,
     Check,
+    Pin,
     Delete,
     Ai,
     Info,
@@ -143,6 +144,13 @@ fun HarmonyIconGlyph(
             HarmonyIcon.Check -> {
                 drawLine(color, Offset(w * 0.22f, h * 0.54f), Offset(w * 0.42f, h * 0.72f), strokeWidth = stroke.width, cap = StrokeCap.Round)
                 drawLine(color, Offset(w * 0.42f, h * 0.72f), Offset(w * 0.78f, h * 0.28f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+            }
+            HarmonyIcon.Pin -> {
+                drawLine(color, Offset(w * 0.32f, h * 0.22f), Offset(w * 0.68f, h * 0.22f), strokeWidth = thin.width, cap = StrokeCap.Round)
+                drawLine(color, Offset(w * 0.38f, h * 0.22f), Offset(w * 0.38f, h * 0.48f), strokeWidth = thin.width, cap = StrokeCap.Round)
+                drawLine(color, Offset(w * 0.62f, h * 0.22f), Offset(w * 0.62f, h * 0.48f), strokeWidth = thin.width, cap = StrokeCap.Round)
+                drawLine(color, Offset(w * 0.28f, h * 0.52f), Offset(w * 0.72f, h * 0.52f), strokeWidth = thin.width, cap = StrokeCap.Round)
+                drawLine(color, Offset(w * 0.50f, h * 0.52f), Offset(w * 0.50f, h * 0.82f), strokeWidth = thin.width, cap = StrokeCap.Round)
             }
             HarmonyIcon.Delete -> {
                 drawLine(color, Offset(w * 0.30f, h * 0.34f), Offset(w * 0.70f, h * 0.34f), strokeWidth = thin.width, cap = StrokeCap.Round)

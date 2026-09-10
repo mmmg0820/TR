@@ -144,8 +144,10 @@ import com.softcat.mystictarot.ui.theme.ThemeChoice
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class InfoItem(
     val title: String,
@@ -283,9 +285,20 @@ fun MyangTarotApp() {
             addAll(repository.loadCustomDecks())
         }
     }
-    var selectedDeckId by remember { mutableStateOf(appSettings.selectedDeckId ?: standardDeck.id) }
     val availableDecks = listOf(standardDeck) + customDecks
+    val storedReadingDraft = remember(repository) { repository.loadReadingDraft() }
+    val validStoredReadingDraft = remember(storedReadingDraft, availableDecks) {
+        storedReadingDraft?.let { draft ->
+            availableDecks.firstOrNull { it.id == draft.deckId && it.enabled }
+                ?.let { draftDeck -> draft.takeIf { it.isRestorable(draftDeck) } }
+        }
+    }
+    val initialDeckId = validStoredReadingDraft?.deckId
+        ?: appSettings.selectedDeckId
+        ?: standardDeck.id
+    var selectedDeckId by remember { mutableStateOf(initialDeckId) }
     val activeDeck = availableDecks.firstOrNull { it.id == selectedDeckId && it.enabled } ?: standardDeck
+    val restoredReadingDraft = validStoredReadingDraft?.takeIf { it.deckId == activeDeck.id }
     val addDeckLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) {
             uris.forEach { uri ->
@@ -323,14 +336,18 @@ fun MyangTarotApp() {
             save = { it.name },
             restore = { name -> AppScreen.entries.firstOrNull { it.name == name } ?: AppScreen.Home }
         )
-    ) { mutableStateOf(AppScreen.Home) }
+    ) { mutableStateOf(restoredReadingDraft?.screen ?: AppScreen.Home) }
     var infoBackScreen by remember { mutableStateOf(AppScreen.Home) }
     var showDeckMenu by remember { mutableStateOf(false) }
     var showDeckPicker by remember { mutableStateOf(false) }
     var editingDeck by remember { mutableStateOf<TarotDeck?>(null) }
     var useReversed by remember { mutableStateOf(appSettings.useReversed) }
     var selectedSpread by rememberSaveable(stateSaver = SpreadOptionStateSaver) {
-        mutableStateOf(selectableSpreadOptions.firstOrNull { it.key == appSettings.recentSpreadKey } ?: selectableSpreadOptions.first())
+        mutableStateOf(
+            restoredReadingDraft?.spread
+                ?: selectableSpreadOptions.firstOrNull { it.key == appSettings.recentSpreadKey }
+                ?: selectableSpreadOptions.first()
+        )
     }
     var recentSpread by remember {
         mutableStateOf(selectableSpreadOptions.firstOrNull { it.key == appSettings.recentSpreadKey })
@@ -339,14 +356,19 @@ fun MyangTarotApp() {
     val customPositionLabelsBySpreadKey = remember {
         mutableStateMapOf<String, List<String>>().apply { putAll(appSettings.customPositionLabelsBySpreadKey) }
     }
-    var currentQuestion by rememberSaveable { mutableStateOf("") }
+    var currentQuestion by rememberSaveable { mutableStateOf(restoredReadingDraft?.question.orEmpty()) }
     var shuffledDeck by rememberSaveable(
         activeDeck.id,
         stateSaver = listSaver(
             save = { cards -> cards.map { it.id } },
             restore = { ids -> ids.mapNotNull { id -> activeDeck.cards.firstOrNull { it.id == id } } }
         )
-    ) { mutableStateOf(shuffleDeckForReading(activeDeck.cards)) }
+    ) {
+        val restoredOrder = restoredReadingDraft?.shuffledCardIds
+            ?.mapNotNull { id -> activeDeck.cards.firstOrNull { it.id == id } }
+            ?.takeIf { it.size == activeDeck.cards.size }
+        mutableStateOf(restoredOrder ?: shuffleDeckForReading(activeDeck.cards))
+    }
     val selectedCards = rememberSaveable(
         activeDeck.id,
         saver = listSaver(
@@ -355,7 +377,13 @@ fun MyangTarotApp() {
                 addAll(ids.mapNotNull { id -> activeDeck.cards.firstOrNull { it.id == id } })
             } }
         )
-    ) { mutableStateListOf<TarotCard>() }
+    ) {
+        mutableStateListOf<TarotCard>().apply {
+            addAll(restoredReadingDraft?.selectedCardIds.orEmpty().mapNotNull { id ->
+                activeDeck.cards.firstOrNull { it.id == id }
+            })
+        }
+    }
     var reusableSelectionIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     val finalCandidateCards = rememberSaveable(
         activeDeck.id,
@@ -365,8 +393,16 @@ fun MyangTarotApp() {
                 addAll(ids.mapNotNull { id -> activeDeck.cards.firstOrNull { it.id == id } })
             } }
         )
-    ) { mutableStateListOf<TarotCard>() }
-    var finalOneSecondStep by rememberSaveable { mutableStateOf(false) }
+    ) {
+        mutableStateListOf<TarotCard>().apply {
+            addAll(restoredReadingDraft?.finalCandidateCardIds.orEmpty().mapNotNull { id ->
+                activeDeck.cards.firstOrNull { it.id == id }
+            })
+        }
+    }
+    var finalOneSecondStep by rememberSaveable {
+        mutableStateOf(restoredReadingDraft?.finalOneSecondStep ?: false)
+    }
     val drawnCards = rememberSaveable(
         activeDeck.id,
         saver = listSaver(
@@ -384,7 +420,14 @@ fun MyangTarotApp() {
                 })
             } }
         )
-    ) { mutableStateListOf<DrawnCard>() }
+    ) {
+        mutableStateListOf<DrawnCard>().apply {
+            addAll(restoredReadingDraft?.drawnCards.orEmpty().mapNotNull { draftCard ->
+                val card = activeDeck.cards.firstOrNull { it.id == draftCard.cardId } ?: return@mapNotNull null
+                DrawnCard(card, draftCard.direction, draftCard.order)
+            })
+        }
+    }
     val savedReadings = remember {
         mutableStateListOf<SavedReading>().apply {
             addAll(repository.loadSavedReadings())
@@ -401,13 +444,55 @@ fun MyangTarotApp() {
     var showSpreadDetails by remember { mutableStateOf(false) }
     var showLlmPrompt by remember { mutableStateOf(false) }
     var readingSaved by rememberSaveable { mutableStateOf(false) }
+    var readingSaveInProgress by rememberSaveable { mutableStateOf(false) }
     var showReselectConfirmation by rememberSaveable { mutableStateOf(false) }
     var lastBackPressAt by remember { mutableLongStateOf(0L) }
     var tabScrollJob by remember { mutableStateOf<Job?>(null) }
     val tabCoroutineScope = rememberCoroutineScope()
+    val appCoroutineScope = rememberCoroutineScope()
     val homeListState = rememberLazyListState()
     val spreadListState = rememberLazyListState()
     val historyListState = rememberLazyListState()
+
+    val draftShuffledCardIds = shuffledDeck.map { it.id }
+    val draftSelectedCardIds = selectedCards.map { it.id }
+    val draftFinalCandidateCardIds = finalCandidateCards.map { it.id }
+    val draftDrawnCards = drawnCards.map { ReadingDraftCard(it.card.id, it.direction, it.order) }
+    LaunchedEffect(
+        screen,
+        activeDeck.id,
+        selectedSpread,
+        currentQuestion,
+        draftShuffledCardIds,
+        draftSelectedCardIds,
+        draftFinalCandidateCardIds,
+        finalOneSecondStep,
+        draftDrawnCards
+    ) {
+        delay(300L)
+        when (screen) {
+            AppScreen.Question, AppScreen.DeckPick, AppScreen.SpreadResult -> withContext(Dispatchers.IO) {
+                repository.persistReadingDraft(
+                    ReadingDraft(
+                        updatedAt = System.currentTimeMillis(),
+                        screen = screen,
+                        deckId = activeDeck.id,
+                        spread = selectedSpread,
+                        question = currentQuestion.take(240),
+                        shuffledCardIds = draftShuffledCardIds,
+                        selectedCardIds = draftSelectedCardIds,
+                        finalCandidateCardIds = draftFinalCandidateCardIds,
+                        finalOneSecondStep = finalOneSecondStep,
+                        drawnCards = draftDrawnCards
+                    )
+                )
+            }
+            AppScreen.Home, AppScreen.SpreadSelect -> withContext(Dispatchers.IO) {
+                repository.clearReadingDraft()
+            }
+            else -> Unit
+        }
+    }
 
     fun scrollTabToTop(listState: LazyListState) {
         if (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) return
@@ -532,6 +617,7 @@ fun MyangTarotApp() {
         showSpreadDetails = false
         showLlmPrompt = false
         readingSaved = false
+        readingSaveInProgress = false
     }
 
     BackHandler(enabled = true) {
@@ -811,6 +897,7 @@ fun MyangTarotApp() {
                 showSpreadDetails = showSpreadDetails,
                 showLlmPrompt = showLlmPrompt,
                 readingSaved = readingSaved,
+                readingSaveInProgress = readingSaveInProgress,
                 showLlmAction = activeDeck.id == standardDeck.id || activeDeck.aiPrompt.isNotBlank(),
                 showCardDetailsAction = drawnCards.any { hasDisplayableCardMeaning(it.card) },
                 deckAiPrompt = activeDeck.aiPrompt,
@@ -832,21 +919,38 @@ fun MyangTarotApp() {
                 onShowLlmPrompt = { showLlmPrompt = true },
                 onCloseLlmPrompt = { showLlmPrompt = false },
                 onSaveReading = {
-                    if (!readingSaved) {
-                        savedReadings.add(buildSavedReading(selectedSpread, currentQuestion, drawnCards, activeDeck))
-                        repository.persistSavedReadings(savedReadings)
-                        buildAutoSavedSpreadPreset(
+                    if (!readingSaved && !readingSaveInProgress) {
+                        readingSaveInProgress = true
+                        val savedReading = buildSavedReading(selectedSpread, currentQuestion, drawnCards, activeDeck)
+                        val readingsSnapshot = savedReadings.toList() + savedReading
+                        val autoSavedPreset = buildAutoSavedSpreadPreset(
                             spread = selectedSpread,
                             baseSpreads = spreadOptions,
                             existingPresets = savedSpreadPresets,
                             now = System.currentTimeMillis()
-                        )?.let { preset ->
-                            savedSpreadPresets.add(preset)
-                            repository.persistSavedSpreadPresets(savedSpreadPresets)
-                        }
-                        readingSaved = true
-                        if (hapticsEnabled) {
-                            systemBarActivity?.window?.decorView?.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                        )
+                        appCoroutineScope.launch {
+                            val persisted = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    repository.persistSavedReadings(readingsSnapshot)
+                                }.getOrDefault(false).also { success ->
+                                    if (success) repository.clearReadingDraft()
+                                }
+                            }
+                            if (persisted) {
+                                savedReadings.add(savedReading)
+                                autoSavedPreset?.let { preset ->
+                                    savedSpreadPresets.add(preset)
+                                    repository.persistSavedSpreadPresets(savedSpreadPresets)
+                                }
+                                readingSaved = true
+                                if (hapticsEnabled) {
+                                    systemBarActivity?.window?.decorView?.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                }
+                            } else {
+                                Toast.makeText(context, "저장하지 못했어요. 다시 시도해 주세요.", Toast.LENGTH_SHORT).show()
+                            }
+                            readingSaveInProgress = false
                         }
                     }
                 },
@@ -858,6 +962,33 @@ fun MyangTarotApp() {
                 adsDisabled = adsDisabled,
                 activatedCodeCount = activatedPurchaseCodeLabels.size,
                 onOpenPurchaseCode = { showPurchaseCodeSheet = true },
+                onShareDiagnostics = {
+                    val diagnostics = collectPrivacySafeDiagnostics(
+                        context = context,
+                        screen = AppScreen.Info,
+                        settings = AppSettings(
+                            themeChoice = themeChoice,
+                            selectedDeckId = selectedDeckId,
+                            useReversed = useReversed,
+                            recentSpreadKey = recentSpread?.key,
+                            spreadUseCounts = spreadUseCounts,
+                            adsDisabled = adsDisabled,
+                            activatedPurchaseCodeLabels = activatedPurchaseCodeLabels.toSet(),
+                            cardBackStyle = cardBackStyle,
+                            customCardBackUri = customCardBackUri,
+                            hapticsEnabled = hapticsEnabled,
+                            customPositionLabelsBySpreadKey = customPositionLabelsBySpreadKey
+                        ),
+                        customDeckCount = customDecks.size,
+                        enabledDeckCount = availableDecks.count { it.enabled },
+                        savedReadingCount = savedReadings.size,
+                        savedSpreadCount = savedSpreadPresets.size,
+                        hasReadingDraft = repository.loadReadingDraft()?.isRestorable(activeDeck) == true
+                    )
+                    if (!sharePrivacySafeDiagnostics(context, diagnostics)) {
+                        Toast.makeText(context, "진단 정보를 공유할 수 없어요", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 bottomPadding = bottomPadding
             )
 
@@ -913,11 +1044,42 @@ fun MyangTarotApp() {
                 },
                 onDeleteReadings = { ids ->
                     if (ids.isNotEmpty()) {
-                        savedReadings.removeAll { it.id in ids }
-                        if (selectedSavedReadingId in ids) {
-                            selectedSavedReadingId = null
+                        val updatedReadings = savedReadings.filterNot { it.id in ids }
+                        appCoroutineScope.launch {
+                            val persisted = withContext(Dispatchers.IO) {
+                                repository.persistSavedReadings(updatedReadings)
+                            }
+                            if (persisted) {
+                                savedReadings.removeAll { it.id in ids }
+                                if (selectedSavedReadingId in ids) {
+                                    selectedSavedReadingId = null
+                                }
+                            } else {
+                                Toast.makeText(context, "기록을 삭제하지 못했어요", Toast.LENGTH_SHORT).show()
+                            }
                         }
-                        repository.persistSavedReadings(savedReadings)
+                    }
+                },
+                onToggleReadingPinned = { readingId ->
+                    val readingIndex = savedReadings.indexOfFirst { it.id == readingId }
+                    if (readingIndex >= 0) {
+                        val updatedReading = savedReadings[readingIndex].copy(
+                            isPinned = !savedReadings[readingIndex].isPinned
+                        )
+                        val updatedReadings = savedReadings.toMutableList().also {
+                            it[readingIndex] = updatedReading
+                        }
+                        appCoroutineScope.launch {
+                            val persisted = withContext(Dispatchers.IO) {
+                                repository.persistSavedReadings(updatedReadings)
+                            }
+                            if (persisted) {
+                                val latestIndex = savedReadings.indexOfFirst { it.id == readingId }
+                                if (latestIndex >= 0) savedReadings[latestIndex] = updatedReading
+                            } else {
+                                Toast.makeText(context, "고정 상태를 저장하지 못했어요", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     }
                 },
                 listState = historyListState,
@@ -932,10 +1094,19 @@ fun MyangTarotApp() {
                     screen = AppScreen.History
                 },
                 onDeleteReading = { id ->
-                    savedReadings.removeAll { it.id == id }
-                    selectedSavedReadingId = null
-                    repository.persistSavedReadings(savedReadings)
-                    screen = AppScreen.History
+                    val updatedReadings = savedReadings.filterNot { it.id == id }
+                    appCoroutineScope.launch {
+                        val persisted = withContext(Dispatchers.IO) {
+                            repository.persistSavedReadings(updatedReadings)
+                        }
+                        if (persisted) {
+                            savedReadings.removeAll { it.id == id }
+                            selectedSavedReadingId = null
+                            screen = AppScreen.History
+                        } else {
+                            Toast.makeText(context, "기록을 삭제하지 못했어요", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 },
                 bottomPadding = bottomPadding
             )
@@ -1292,10 +1463,9 @@ fun SystemPanel(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x10000000), spotColor = Color(0x0D000000))
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(harmonyPanel)
-            .border(1.dp, harmonyDivider.copy(alpha = 0.7f), RoundedCornerShape(24.dp))
+            .border(1.dp, harmonyDivider, RoundedCornerShape(8.dp))
             .padding(vertical = 5.dp),
         content = content
     )
@@ -1306,9 +1476,9 @@ fun InfoSummaryCard(title: String, subtitle: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(harmonyPanel)
-            .border(1.dp, harmonyDivider.copy(alpha = 0.65f), RoundedCornerShape(24.dp))
+            .border(1.dp, harmonyDivider, RoundedCornerShape(8.dp))
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1631,6 +1801,7 @@ private fun InfoScreen(
     adsDisabled: Boolean,
     activatedCodeCount: Int,
     onOpenPurchaseCode: () -> Unit,
+    onShareDiagnostics: () -> Unit,
     bottomPadding: Dp
 ) {
     val context = LocalContext.current
@@ -1720,6 +1891,13 @@ private fun InfoScreen(
                 subtitle = if (adsDisabled) "커피 코드 적용됨 · ${activatedCodeCount}개" else "커피를 선물해준 당신에게 드리는 서비스",
                 icon = if (adsDisabled) HarmonyIcon.Check else HarmonyIcon.Info,
                 onClick = onOpenPurchaseCode
+            )
+            SystemDivider()
+            SystemMenuRow(
+                title = "진단 정보 공유",
+                subtitle = "질문 · 카드 내용 · 개인 이미지는 포함하지 않음",
+                icon = HarmonyIcon.Info,
+                onClick = onShareDiagnostics
             )
         }
     }
@@ -2233,15 +2411,9 @@ fun HarmonyCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = 4.dp,
-                shape = RoundedCornerShape(24.dp),
-                ambientColor = Color(0x10000000),
-                spotColor = Color(0x0D000000)
-            )
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(harmonyPanel)
-            .border(1.dp, harmonyDivider.copy(alpha = 0.72f), RoundedCornerShape(24.dp))
+            .border(1.dp, harmonyDivider, RoundedCornerShape(8.dp))
             .padding(padding),
         content = content
     )

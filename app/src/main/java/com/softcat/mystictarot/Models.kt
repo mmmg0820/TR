@@ -4,7 +4,7 @@ import com.softcat.mystictarot.ui.theme.ThemeChoice
 
 const val APP_SETTINGS_SCHEMA_VERSION = 4
 const val CUSTOM_DECK_SCHEMA_VERSION = 3
-const val SAVED_READING_SCHEMA_VERSION = 3
+const val SAVED_READING_SCHEMA_VERSION = 5
 const val DEFAULT_CUSTOM_CARD_MEANING = "개인 덱 카드입니다. 카드 이미지와 질문, 스프레드 위치를 함께 보고 해석하세요."
 
 data class TarotCard(
@@ -68,13 +68,24 @@ data class SavedReading(
     val spreadTitle: String,
     val layoutTitle: String = spreadTitle,
     val positionPresetTitle: String = spreadTitle,
+    val spreadKeySnapshot: String = "",
+    val layoutIdSnapshot: String = "",
+    val drawModeSnapshot: SpreadDrawMode = SpreadDrawMode.Normal,
+    val spreadSlotsSnapshot: List<SavedSpreadSlotSnapshot> = emptyList(),
     val question: String = "",
     val interpretation: String = "",
     val deckId: String = "standard",
     val deckName: String = "유니버셜 타로",
     val deckAiPromptSnapshot: String = "",
+    val isPinned: Boolean = false,
     val cards: List<SavedReadingCard>,
     val schemaVersion: Int = SAVED_READING_SCHEMA_VERSION
+)
+
+data class SavedSpreadSlotSnapshot(
+    val x: Float,
+    val y: Float,
+    val rotation: Float = 0f
 )
 
 data class SavedReadingCard(

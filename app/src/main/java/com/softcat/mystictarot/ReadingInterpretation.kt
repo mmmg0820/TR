@@ -73,6 +73,16 @@ internal fun buildSavedReading(
         spreadTitle = spread.positionPresetTitle,
         layoutTitle = spread.layoutTitle,
         positionPresetTitle = spread.positionPresetTitle,
+        spreadKeySnapshot = spread.key,
+        layoutIdSnapshot = spread.layoutId,
+        drawModeSnapshot = spread.drawMode,
+        spreadSlotsSnapshot = spreadSlots(spread, drawnCards.size).map { slot ->
+            SavedSpreadSlotSnapshot(
+                x = slot.x,
+                y = slot.y,
+                rotation = slot.rotation
+            )
+        },
         question = trimmedQuestion,
         interpretation = buildLocalReadingInterpretation(spread, trimmedQuestion, drawnCards),
         deckId = deck.id,
